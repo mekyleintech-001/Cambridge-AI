@@ -1,7 +1,9 @@
 streamlit
 groq
 faiss-cpu
-numpy
-torch
-torchvision
-sentence-transformers==2.2.2
+numpy<2
+torch==2.2.2
+torchvision==0.17.2
+transformers==4.39.3
+huggingface-hub==0.20.3
+sentence-transformers==2.5.1
