@@ -24,6 +24,7 @@ def get_supabase():
     return create_client(url, key)
 
 supabase = get_supabase()
+
 def get_user_id():
     if st.user.is_logged_in:
         return st.user.email.replace('@','_at_').replace('.','_')
@@ -126,26 +127,43 @@ CRITICAL SUBJECT DETECTION - CHECK IN THIS EXACT ORDER:
 
 Example: "what the formula for finding area under graph of a polar graphs" -> MUST BE 9231, NOT 9709.
 
-OUTPUT FORMAT:
-- Start with **Subject detected: 9231 Further Mathematics** (or correct code)
-- Use proper LaTeX: $$A = \\frac{{1}}{{2}} \\int_{{\\alpha}}^{{\\beta}} [f(\\theta)]^2 d\\theta$$
-- Never write (theta), always write \\theta, \\alpha, \\beta
-- Use bold for mark scheme keywords
+FLOW: You are given SIMILAR QP FOUND + EQUIVALENT MS. State which paper you found, then use MS with M1 A1 B1 bold.
 
-MARK SCHEME: Use 7 chunks, latest year first (2024 > 2023). Mention year.
+OUTPUT:
+- Start with **Subject detected: 9231 Further Mathematics** (or correct)
+- Use LaTeX: $$A = \\frac{{1}}{{2}} \\int_{{\\alpha}}^{{\\beta}} [f(\\theta)]^2 d\\theta$$
+- Never write (theta), write \\theta
+- Mention year: "From 2024 Mark Scheme"
 
 Level: {level}
-Simple: 3000 tokens short bullets, Moderate: 5000 detailed, Best: 8192 full answer with examples
+Simple: 3000 tokens short, Moderate: 5000 detailed, Best: 8192 full
 
-CONTEXT:
+CONTEXT (QP + MS LINKED):
 {context}
 """
 
+# === FIXED IMAGE FUNCTION - SOLVES YOUR OSError ===
 def to_b64(file):
-    img=Image.open(file)
-    if max(img.size)>1024: img.thumbnail((1024,1024))
-    buf=BytesIO(); img.save(buf, format="JPEG")
-    return base64.b64encode(buf.getvalue()).decode()
+    try:
+        img = Image.open(file)
+        # Fix RGBA/P mode which JPEG cannot save
+        if img.mode in ("RGBA", "LA", "P"):
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            background.paste(img, mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None)
+            img = background
+        else:
+            img = img.convert("RGB")
+
+        if max(img.size) > 1024:
+            img.thumbnail((1024, 1024))
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        print(f"Image error: {e}")
+        return None
 
 with st.sidebar:
     st.markdown("## 🎓 Cambridge AI")
@@ -168,7 +186,7 @@ with st.sidebar:
 
 current=st.session_state.chats[st.session_state.current_chat]
 st.title("Cambridge AI")
-st.caption(f"{st.session_state.level} • {len(chunks)} chunks")
+st.caption(f"{st.session_state.level} • {len(chunks)} chunks • QP->MS")
 for m in current["messages"]:
     with st.chat_message(m["role"]):
         if "image_bytes" in m: st.image(m["image_bytes"], width=350)
@@ -190,26 +208,57 @@ if prompt_data:
     text = prompt_data.text if hasattr(prompt_data, 'text') else str(prompt_data)
     files = prompt_data.files if hasattr(prompt_data, 'files') else []
     b64=None; img_bytes=None
+    # === FIXED FILE HANDLING - PREVENTS CRASH ===
     if len(files)>0:
-        img_bytes=files[0].getvalue(); b64=to_b64(files[0])
-        if not text: text="Explain this picture using marking scheme"
+        try:
+            img_bytes = files[0].getvalue()
+            b64 = to_b64(files[0])
+        except Exception as e:
+            print(f"File read error: {e}")
+            img_bytes = None
+            b64 = None
+        if not text:
+            text="Explain this picture using marking scheme, detect subject"
+
     if text:
         if current["title"]=="New Chat": current["title"]=text[:35]
         umsg={"role":"user","content":text}
         if img_bytes: umsg["image_bytes"]=img_bytes
         current["messages"].append(umsg)
         with st.chat_message("assistant"):
-            ph=st.empty(); ph.markdown("💭 Checking...")
+            ph=st.empty(); ph.markdown("🔍 Step 1: Finding similar Question Paper...")
             token_map={"Simple":3000,"Moderate":5000,"Best":8192}
             q_emb=embed_model.encode([text])
-            D,I=index.search(np.array(q_emb).astype('float32'),7)
-            raw = [chunks[i] for i in I[0]]
+            D,I=index.search(np.array(q_emb).astype('float32'),25)
+            raw_all = [chunks[i] for i in I[0]]
+
             def get_y(t):
                 yrs = re.findall(r'(20[1-2][0-9])', t)
                 return max([int(y) for y in yrs]) if yrs else 0
-            raw_sorted = sorted(raw, key=get_y, reverse=True)
-            context="\n\n---\n\n".join(raw_sorted)
+
+            raw_str_list = [ (c["text"] if isinstance(c, dict) else c) for c in raw_all ]
+            qp_like = []
+            ms_like = []
+            for txt in raw_str_list:
+                if any(k in txt for k in ["M1","A1","B1","M0","A0","FT","mark scheme"]):
+                    ms_like.append(txt)
+                else:
+                    qp_like.append(txt)
+
+            qp_like_sorted = sorted(qp_like, key=get_y, reverse=True)
+            ms_like_sorted = sorted(ms_like, key=get_y, reverse=True)
+            best_qp = qp_like_sorted[0] if qp_like_sorted else raw_str_list[0]
+
+            ph.markdown(f"✅ Similar QP: {best_qp[:100]}... \n\n🔍 Step 2: Pulling Mark Scheme...")
+
+            if ms_like_sorted:
+                context = f"SIMILAR QUESTION PAPER FOUND:\n{best_qp}\n\n---\n\nEQUIVALENT MARK SCHEME (Latest year first):\n" + "\n\n---\n\n".join(ms_like_sorted[:6])
+            else:
+                context = "\n\n---\n\n".join(sorted(raw_str_list, key=get_y, reverse=True)[:7])
+
             system_prompt = get_system_prompt(st.session_state.level, context)
+
+            # If image failed to convert, send text only
             if b64:
                 resp=client.chat.completions.create(model="meta-llama/llama-4-scout-17b-16e-instruct",
                     messages=[{"role":"system","content": system_prompt},
@@ -219,6 +268,7 @@ if prompt_data:
                 resp=client.chat.completions.create(model="openai/gpt-oss-20b",
                     messages=[{"role":"system","content": system_prompt},{"role":"user","content": text}],
                     max_tokens=token_map[st.session_state.level])
+
             ans=fix(resp.choices[0].message.content)
             ph.empty(); st.markdown(ans)
             current["messages"].append({"role":"assistant","content":ans})
