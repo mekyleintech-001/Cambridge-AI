@@ -13,21 +13,38 @@ from groq import Groq
 st.set_page_config(page_title="Kyle AI", page_icon="🤖")
 
 # ----- GOOGLE LOGIN -----
-if not st.user.is_logged_in:
+# ----- GOOGLE LOGIN -----
+if "guest_mode" not in st.session_state:
+    st.session_state.guest_mode = False
+
+if not st.user.is_logged_in and not st.session_state.guest_mode:
     st.title("Welcome to Kyle AI 🤖")
     st.write("Please login to continue and save your chat history")
 
-    if st.button("Continue with Google"):
-        st.login()
-    st.stop() # Stop here if not logged in
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Continue with Google", use_container_width=True):
+            st.login()
+    with col2:
+        if st.button("Continue as Guest", use_container_width=True):
+            st.session_state.guest_mode = True
+            st.rerun()
+
+    st.stop()
 
 # ----- IF LOGGED IN, SHOW THIS -----
-st.sidebar.write(f"Logged in as: {st.user.email}")
-if st.sidebar.button("Logout"):
-    st.logout()
-
-st.title(f"Hi {st.user.name} 👋")
-st.write("What can I help you with today?")
+if st.user.is_logged_in:
+    st.sidebar.write(f"Logged in as: {st.user.email}")
+    if st.sidebar.button("Logout"):
+        st.logout()
+else:
+    st.sidebar.write("You are in Guest mode")
+    st.sidebar.caption("Login to save chat history")
+    if st.sidebar.button("Login with Google"):
+        st.login()
+    if st.sidebar.button("Exit Guest"):
+        st.session_state.guest_mode = False
+        st.rerun()
 
 #... YOUR EXISTING GROQ / RAG CODE GOES BELOW HERE...
 
