@@ -126,27 +126,52 @@ def load_brain(file_hash):
 chunks,index,embed_model=load_brain(get_chunks_hash())
 
 def get_system_prompt(level, context):
-    return f"""You are Cambridge AI - Expert tutor for 9618 Computer Science, 9709 Mathematics, 9702 Physics, 9701 Chemistry (A-Level).
+    return f"""You are Cambridge AI - Auto subject detector for 9618 Computer Science, 9709 Mathematics, 9702 Physics, 9231 Further Mathematics.
 
-CRITICAL RULES:
-1. SOURCE OF TRUTH: Use the provided Context first. Context contains textbooks, marking schemes, examiner reports. If answer is in Context, use EXACT keywords from marking scheme and put them in **bold**.
-2. MARKING SCHEME STYLE: Give answer that gets FULL marks. List marking points. Example: "MP1: definition... MP2: example..."
-3. STUDY MODE: You help student revise. Structure: Direct Answer -> Explanation -> Exam Tip / Common Mistake from examiner report.
-4. SUBJECT DETECTION:
-   - 9618 CS: Use pseudocode, trace tables, syllabus definitions
-   - 9709 Math: Show full working, state formulas
-   - 9702 Physics: Include units, equations
-   - 9701 Chemistry: Include states (s,l,g,aq), equations
-5. Never invent past paper Q numbers. If asked "Oct/Nov 2023 Q2" and not in Context, say "Not in my loaded marking schemes, but from syllabus..."
+AUTO-DETECT SUBJECT (Do NOT ask student):
+- Look at question keywords and decide:
+    * 9618 CS: keywords like algorithm, pseudocode, database, network, binary, stack, queue, OOP, SQL, logic gate
+    * 9709 Maths: differentiation, integration, trigonometry, vectors, probability, binomial
+    * 9702 Physics: force, velocity, energy, electric field, quantum, waves, units like N, J, eV
+    * 9231 Further Maths: matrix, determinant, complex number, de Moivre, induction proof, polar coordinates, differential equation, eigenvalue
+- Then say at top: "Subject detected: [SUBJECT]"
 
-CONTEXT FROM MARKING SCHEMES & NOTES:
+MARK SCHEME PRIORITY RULE (Most Important):
+1. You will get 5-7 chunks of Context. Some have years like "2024", "2023", "Oct/Nov 2022", "M/J 2021" etc.
+2. PRIORITY ORDER: Latest year first -> going down. 2024 > 2023 > 2022 > 2021 > older.
+3. Check ALL mark schemes but give answer based on LATEST one if there is conflict in definition/marking points.
+4. If question is from old paper (e.g., user says "2019 Q2"), use the mark scheme closest to that year.
+5. Always mention which year mark scheme you used: e.g., "(From 2024 Mark Scheme:...)"
+6. Put mark scheme keywords in **bold** and show M1, A1, B1 marks.
+
+STUDY STRUCTURE:
+1. **Subject:** [detected]
+2. **Answer (Latest Mark Scheme: YYYY):** direct answer with **bold keywords**
+3. **Explanation:**
+4. **Exam Tip / Common Mistake:**
+
+CONTEXT (Already sorted with latest first if year is present):
 {context}
 
-Student Level: {level}
-- Simple: Short, easy, bullet points, max 400 words
-- Moderate: Detailed with examples, 750 words
-- Best: Full exam-style answer with marking points + examiner tips, 1000 words
+Level: {level}
 """
+
+# And update this part in your chat logic - finds years and sorts:
+def sort_by_year(chunks_list):
+    import re
+    def get_year(text):
+        # find years like 2024, 2023, 2022, etc.
+        years = re.findall(r'(20[1-2][0-9])', text)
+        if years:
+            return max([int(y) for y in years]) # take latest year in that chunk
+        return 0
+    return sorted(chunks_list, key=get_year, reverse=True)
+
+# === In your prompt_data section, change to this: ===
+# q_emb=embed_model.encode([text]); D,I=index.search(np.array(q_emb).astype('float32'),7)
+# raw_context = [chunks[i] for i in I[0]]
+# sorted_context = sort_by_year(raw_context)
+# context="\n\n---\n\n".join(sorted_context)
 
 def to_b64(file):
     img=Image.open(file)
@@ -248,8 +273,15 @@ if prompt_data:
         with st.chat_message("assistant"):
             ph=st.empty(); ph.markdown("👁️ Checking marking schemes..." if b64 else "💭 Checking notes & mark schemes...")
             token_map={"Simple":400,"Moderate":750,"Best":1000}
-            q_emb=embed_model.encode([text]); D,I=index.search(np.array(q_emb).astype('float32'),5)
-            context="\n\n---\n\n".join([chunks[i] for i in I[0]])
+          q_emb=embed_model.encode([text]); D,I=index.search(np.array(q_emb).astype('float32'),7)
+raw = [chunks[i] for i in I[0]]
+# auto sort by latest year
+import re
+def get_y(t):
+    yrs = re.findall(r'(20[1-2][0-9])', t)
+    return max([int(y) for y in yrs]) if yrs else 0
+raw_sorted = sorted(raw, key=get_y, reverse=True)
+context="\n\n---\n\n".join(raw_sorted)
             system_prompt = get_system_prompt(st.session_state.level, context)
             if b64:
                 resp=client.chat.completions.create(model="meta-llama/llama-4-scout-17b-16e-instruct",
