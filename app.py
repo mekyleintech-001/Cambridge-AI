@@ -78,8 +78,11 @@ if st.session_state.get("loaded_uid")!=uid:
 
 if "level" not in st.session_state: st.session_state.level="Simple"
 
-# YOUR ORIGINAL WORKING MODEL
-MODEL = "openai/gpt-oss-20b"
+# WORKING MODELS - ONLY THESE
+TEXT_MODEL = "llama-3.3-70b-versatile"
+TEXT_FALLBACK = "llama-3.1-8b-instant"
+VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
+VISION_FALLBACK = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 client=Groq(api_key=st.secrets["GROQ_API_KEY"])
 
@@ -147,7 +150,7 @@ with st.sidebar:
 
 current=st.session_state.chats[st.session_state.current_chat]
 st.title("Cambridge AI")
-st.caption(f"{st.session_state.level} • {len(chunks)} • Model: {MODEL}")
+st.caption(f"{st.session_state.level} • {len(chunks)} • {VISION_MODEL}")
 for m in current["messages"]:
     with st.chat_message(m["role"]):
         if "image_bytes" in m: st.image(m["image_bytes"], width=350)
@@ -180,7 +183,7 @@ if prompt_data:
             ph=st.empty(); token_map={"Simple":3000,"Moderate":5000,"Best":8192}
             if greet:
                 system_prompt=get_system_prompt(st.session_state.level,"",True)
-                resp=client.chat.completions.create(model=MODEL, messages=[{"role":"system","content":system_prompt},{"role":"user","content":text}], max_tokens=500)
+                resp=client.chat.completions.create(model=TEXT_MODEL, messages=[{"role":"system","content":system_prompt},{"role":"user","content":text}], max_tokens=500)
                 ans=fix(resp.choices[0].message.content); ph.empty(); st.markdown(ans); current["messages"].append({"role":"assistant","content":ans})
             else:
                 ph.markdown("🔍 Step 1: Finding QP..."); q_emb=embed_model.encode([text]); D,I=index.search(np.array(q_emb).astype('float32'),25); raw_all=[chunks[i] for i in I[0]]
@@ -196,10 +199,16 @@ if prompt_data:
                 if ms_sorted: context=f"SIMILAR QP FOUND:\n{best_qp}\n\n---\n\nEQUIVALENT MARK SCHEME:\n" + "\n\n---\n\n".join(ms_sorted[:6])
                 else: context="\n\n---\n\n".join(sorted(raw_str_list, key=get_y, reverse=True)[:7])
                 system_prompt=get_system_prompt(st.session_state.level, context, False)
-                # USE YOUR ORIGINAL MODEL FOR BOTH TEXT AND IMAGE
-                if b64:
-                    resp=client.chat.completions.create(model=MODEL, messages=[{"role":"system","content":system_prompt},{"role":"user","content":[{"type":"text","text":text},{"type":"image_url","image_url":{"url": f"data:image/jpeg;base64,{b64}"}}]}], max_tokens=token_map[st.session_state.level])
-                else:
-                    resp=client.chat.completions.create(model=MODEL, messages=[{"role":"system","content":system_prompt},{"role":"user","content":text}], max_tokens=token_map[st.session_state.level])
+                try:
+                    if b64:
+                        resp=client.chat.completions.create(model=VISION_MODEL, messages=[{"role":"system","content":system_prompt},{"role":"user","content":[{"type":"text","text":text},{"type":"image_url","image_url":{"url": f"data:image/jpeg;base64,{b64}"}}]}], max_tokens=token_map[st.session_state.level])
+                    else:
+                        resp=client.chat.completions.create(model=TEXT_MODEL, messages=[{"role":"system","content":system_prompt},{"role":"user","content":text}], max_tokens=token_map[st.session_state.level])
+                except Exception as e:
+                    print(f"First failed {e}, trying fallback")
+                    if b64:
+                        resp=client.chat.completions.create(model=VISION_FALLBACK, messages=[{"role":"system","content":system_prompt},{"role":"user","content":[{"type":"text","text":text},{"type":"image_url","image_url":{"url": f"data:image/jpeg;base64,{b64}"}}]}], max_tokens=token_map[st.session_state.level])
+                    else:
+                        resp=client.chat.completions.create(model=TEXT_FALLBACK, messages=[{"role":"system","content":system_prompt},{"role":"user","content":text}], max_tokens=token_map[st.session_state.level])
                 ans=fix(resp.choices[0].message.content); ph.empty(); st.markdown(ans); current["messages"].append({"role":"assistant","content":ans})
         save_chats_for_user(uid, st.session_state.chats); st.rerun()
