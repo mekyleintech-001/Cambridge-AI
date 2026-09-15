@@ -1,58 +1,45 @@
-import os, faiss, pickle, numpy as np
 import streamlit as st
-from groq import Groq
+import pickle
+import faiss
+import numpy as np
 from sentence_transformers import SentenceTransformer
+from groq import Groq
 
-st.set_page_config(page_title="CambridgeAI 9618", page_icon="🎓")
-st.title("🎓 CambridgeAI 9618")
+st.set_page_config(page_title="Cambridge AI", page_icon="📚")
 
-API_KEY = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
-if not API_KEY:
-    st.error("Add GROQ_API_KEY in Streamlit Secrets")
-    st.stop()
-
-client = Groq(api_key=API_KEY)
+# Load secrets
+client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 WORKING_MODEL = "llama-3.3-70b-versatile"
 
+# Load your brain files
 @st.cache_resource
-def load_data():
-    model = SentenceTransformer('all-MiniLM-L6-v2')
+def load_brain():
+    with open("chunks.pkl", "rb") as f:
+        chunks = pickle.load(f)
     index = faiss.read_index("model.faiss")
-    chunks = pickle.load(open("chunks.pkl","rb"))
-    return model, index, chunks
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    return chunks, index, model
 
-embed_model, index, chunks = load_data()
-st.success(f"Ready: {len(chunks)} chapters | {WORKING_MODEL}")
+chunks, index, embed_model = load_brain()
 
-style = st.radio("Style", ["Explain","Exam Question","Mark My Answer"], horizontal=True)
+st.title("Cambridge AI - Ready")
+st.write(f"Loaded {len(chunks)} chapters")
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+query = st.text_input("Ask anything...")
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+if query:
+    # Search
+    q_emb = embed_model.encode([query])
+    D, I = index.search(np.array(q_emb).astype('float32'), 3)
+    context = "\n\n".join([chunks[i] for i in I[0]])
 
-if question := st.chat_input("Ask anything..."):
-    st.session_state.messages.append({"role":"user","content":question})
-    with st.chat_message("user"):
-        st.markdown(question)
-
-    q_emb = embed_model.encode([question])
-    D,I = index.search(np.array(q_emb), k=5)
-    context = "\n".join([chunks[i] for i in I[0]])[:4000]
-
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            r = client.chat.completions.create(
-                model=WORKING_MODEL,
-                messages=[
-                    {"role":"system","content":f"Cambridge 9618 tutor, style:{style}. Context:{context}"},
-                    {"role":"user","content":question}
-                ],
-                max_tokens=800
-            )
-            answer = r.choices[0].message.content
-            st.markdown(answer)
-
-    st.session_state.messages.append({"role":"assistant","content":answer})
+    # Ask Groq
+    r = client.chat.completions.create(
+        model=WORKING_MODEL,
+        messages=[
+            {"role": "system", "content": f"You are a Cambridge exam tutor. Use this context:\n{context}"},
+            {"role": "user", "content": query}
+        ],
+        max_tokens=800
+    )
+    st.write(r.choices[0].message.content)
