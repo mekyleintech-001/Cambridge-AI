@@ -1,21 +1,19 @@
 import streamlit as st
-import uuid
-import pickle
-import faiss
-import json
-import base64
-import os
+import uuid, pickle, faiss, json, base64, os, glob
 import numpy as np
 from PIL import Image
 from sentence_transformers import SentenceTransformer
 from groq import Groq
 from io import BytesIO
 from supabase import create_client
-import glob, os
+
+# === REBUILD model.faiss FROM PARTS (GitHub 25MB limit fix) ===
 if not os.path.exists("model.faiss"):
-    with open("model.faiss", 'wb') as out:
-        for p in sorted(glob.glob("model.faiss.part*")):
-            out.write(open(p,'rb').read())
+    part_files = sorted(glob.glob("model.faiss.part*"))
+    if part_files:
+        with open("model.faiss", 'wb') as out:
+            for p in part_files:
+                out.write(open(p,'rb').read())
 
 # === SUPABASE SETUP ===
 def get_supabase():
@@ -111,13 +109,44 @@ if st.session_state.get("loaded_uid")!= uid:
 if "level" not in st.session_state: st.session_state.level="Simple"
 
 client=Groq(api_key=st.secrets["GROQ_API_KEY"])
+
+def get_chunks_hash():
+    try:
+        return os.path.getmtime("chunks.pkl")
+    except:
+        return 0
+
 @st.cache_resource
-def load_brain():
+def load_brain(file_hash):
     chunks=pickle.load(open("chunks.pkl","rb"))
     index=faiss.read_index("model.faiss")
     model=SentenceTransformer('all-MiniLM-L6-v2')
     return chunks,index,model
-chunks,index,embed_model=load_brain()
+
+chunks,index,embed_model=load_brain(get_chunks_hash())
+
+def get_system_prompt(level, context):
+    return f"""You are Cambridge AI - Expert tutor for 9618 Computer Science, 9709 Mathematics, 9702 Physics, 9701 Chemistry (A-Level).
+
+CRITICAL RULES:
+1. SOURCE OF TRUTH: Use the provided Context first. Context contains textbooks, marking schemes, examiner reports. If answer is in Context, use EXACT keywords from marking scheme and put them in **bold**.
+2. MARKING SCHEME STYLE: Give answer that gets FULL marks. List marking points. Example: "MP1: definition... MP2: example..."
+3. STUDY MODE: You help student revise. Structure: Direct Answer -> Explanation -> Exam Tip / Common Mistake from examiner report.
+4. SUBJECT DETECTION:
+   - 9618 CS: Use pseudocode, trace tables, syllabus definitions
+   - 9709 Math: Show full working, state formulas
+   - 9702 Physics: Include units, equations
+   - 9701 Chemistry: Include states (s,l,g,aq), equations
+5. Never invent past paper Q numbers. If asked "Oct/Nov 2023 Q2" and not in Context, say "Not in my loaded marking schemes, but from syllabus..."
+
+CONTEXT FROM MARKING SCHEMES & NOTES:
+{context}
+
+Student Level: {level}
+- Simple: Short, easy, bullet points, max 400 words
+- Moderate: Detailed with examples, 750 words
+- Best: Full exam-style answer with marking points + examiner tips, 1000 words
+"""
 
 def to_b64(file):
     img=Image.open(file)
@@ -128,6 +157,7 @@ def fix(t): return t.replace(r'\[','$$').replace(r'\]','$$').replace('○','-')
 
 with st.sidebar:
     st.markdown("## 🎓 Cambridge AI")
+    st.caption(f"📚 Loaded {len(chunks)} chunks")
     if st.user.is_logged_in:
         st.write(f"Logged in as: {st.user.email}")
         if st.button("Logout", use_container_width=True):
@@ -188,6 +218,7 @@ for m in current["messages"]:
     with st.chat_message(m["role"]):
         if "image_bytes" in m: st.image(m["image_bytes"], width=350)
         st.markdown(fix(m["content"]))
+
 c1,c2,c3=st.columns(3)
 with c1:
     if st.button("Simple 400", use_container_width=True, type="primary" if st.session_state.level=="Simple" else "secondary"):
@@ -198,6 +229,7 @@ with c2:
 with c3:
     if st.button("Best 1000", use_container_width=True, type="primary" if st.session_state.level=="Best" else "secondary"):
         st.session_state.level="Best"; st.rerun()
+
 prompt_data = st.chat_input("ask or paste image (Ctrl+V)...", accept_file=True, file_type=["jpg","jpeg","png","webp"])
 if prompt_data:
     text = prompt_data.text if hasattr(prompt_data, 'text') else str(prompt_data)
@@ -207,25 +239,26 @@ if prompt_data:
     if len(files)>0:
         img_bytes=files[0].getvalue()
         b64=to_b64(files[0])
-        if not text: text="Explain this picture in detail"
+        if not text: text="Explain this picture using marking scheme keywords"
     if text:
         if current["title"]=="New Chat": current["title"]=text[:35]
         umsg={"role":"user","content":text}
         if img_bytes: umsg["image_bytes"]=img_bytes
         current["messages"].append(umsg)
         with st.chat_message("assistant"):
-            ph=st.empty(); ph.markdown("👁️ Looking at picture..." if b64 else "💭 Thinking...")
+            ph=st.empty(); ph.markdown("👁️ Checking marking schemes..." if b64 else "💭 Checking notes & mark schemes...")
             token_map={"Simple":400,"Moderate":750,"Best":1000}
-            q_emb=embed_model.encode([text]); D,I=index.search(np.array(q_emb).astype('float32'),3)
-            context="\n\n".join([chunks[i] for i in I[0]])
+            q_emb=embed_model.encode([text]); D,I=index.search(np.array(q_emb).astype('float32'),5)
+            context="\n\n---\n\n".join([chunks[i] for i in I[0]])
+            system_prompt = get_system_prompt(st.session_state.level, context)
             if b64:
                 resp=client.chat.completions.create(model="meta-llama/llama-4-scout-17b-16e-instruct",
-                    messages=[{"role":"system","content": f"Tutor {st.session_state.level}. Context:{context}"},
+                    messages=[{"role":"system","content": system_prompt},
                               {"role":"user","content":[{"type":"text","text": text},{"type":"image_url","image_url":{"url": f"data:image/jpeg;base64,{b64}"}}]}],
                     max_tokens=token_map[st.session_state.level])
             else:
                 resp=client.chat.completions.create(model="openai/gpt-oss-20b",
-                    messages=[{"role":"system","content": f"Level {st.session_state.level}. Context:{context}"},{"role":"user","content": text}],
+                    messages=[{"role":"system","content": system_prompt},{"role":"user","content": text}],
                     max_tokens=token_map[st.session_state.level])
             ans=fix(resp.choices[0].message.content)
             ph.empty(); st.markdown(ans)
