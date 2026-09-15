@@ -140,7 +140,6 @@ with st.sidebar:
         save_chats_for_user(uid, st.session_state.chats)
         st.rerun()
     st.divider()
-       st.divider()
     st.write("Your chats:")
     # List old chats with delete
     for cid, chat in list(st.session_state.chats.items())[::-1][:15]:
