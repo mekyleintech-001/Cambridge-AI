@@ -140,11 +140,35 @@ with st.sidebar:
         save_chats_for_user(uid, st.session_state.chats)
         st.rerun()
     st.divider()
-    # List old chats
-    for cid, chat in list(st.session_state.chats.items())[::-1][:10]:
-        if st.button(chat["title"][:25], key=f"hist_{cid}", use_container_width=True):
-            st.session_state.current_chat = cid
-            st.rerun()
+       st.divider()
+    st.write("Your chats:")
+    # List old chats with delete
+    for cid, chat in list(st.session_state.chats.items())[::-1][:15]:
+        col_a, col_b = st.columns([4,1])
+        with col_a:
+            if st.button(chat["title"][:22], key=f"hist_{cid}", use_container_width=True):
+                st.session_state.current_chat = cid
+                st.rerun()
+        with col_b:
+            if st.button("🗑️", key=f"del_{cid}"):
+                del st.session_state.chats[cid]
+                if not st.session_state.chats:
+                    nid=str(uuid.uuid4())[:8]
+                    st.session_state.chats={nid:{"title":"New Chat","messages":[{"role":"assistant","content":"Hey!"}]}}
+                    st.session_state.current_chat=nid
+                else:
+                    st.session_state.current_chat = list(st.session_state.chats.keys())[0]
+                save_chats_for_user(uid, st.session_state.chats)
+                st.rerun()
+
+    if st.button("🗑️ Clear ALL history", use_container_width=True):
+        # delete file
+        f = CHAT_FOLDER / f"{uid}.json"
+        if f.exists(): f.unlink()
+        nid=str(uuid.uuid4())[:8]
+        st.session_state.chats={nid:{"title":"New Chat","messages":[{"role":"assistant","content":"Hey! Ask or 📷 add picture"}]}}
+        st.session_state.current_chat=nid
+        st.rerun()
 
 current=st.session_state.chats[st.session_state.current_chat]
 st.title("Cambridge AI")
