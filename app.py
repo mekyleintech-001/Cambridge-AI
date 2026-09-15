@@ -91,6 +91,13 @@ if st.session_state.get("loaded_uid")!=uid:
     st.session_state.loaded_uid=uid
 
 if "level" not in st.session_state: st.session_state.level="Simple"
+
+# === WORKING MODELS ===
+TEXT_MODEL = "llama-3.3-70b-versatile"
+VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
+FALLBACK_VISION = "llama-3.2-11b-vision-preview"
+FALLBACK_TEXT = "llama-3.1-8b-instant"
+
 client=Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 def get_chunks_hash():
@@ -112,41 +119,43 @@ def fix(t):
     t = t.replace('○','-').replace('•','- ')
     return t
 
-def get_system_prompt(level, context):
+def get_system_prompt(level, context, is_greeting=False):
+    if is_greeting:
+        return f"""You are Kyle AI, friendly Cambridge assistant for 9618 CS, 9709 Maths, 9702 Physics, 9231 Further Maths.
+User just said hi. Reply friendly like "Hie! I'm Kyle AI 👋 Ready to help with past paper questions? Upload a pic or ask anything."
+Do NOT say 'Subject detected'. Do NOT mention mark scheme. Keep short.
+"""
     return f"""You are Cambridge AI for 9618 CS, 9709 Maths, 9702 Physics, 9231 Further Maths.
 
-CRITICAL SUBJECT DETECTION - CHECK IN THIS EXACT ORDER:
+RULE: Only show Subject detected if academic question. For hi/hello/thanks, NEVER show it.
 
-1. IF question contains ANY: polar, r = f(theta), r=f(theta), area polar, de Moivre, complex number, modulus argument, matrix, eigenvalue, hyperbolic functions, Maclaurin series -> SUBJECT MUST BE 9231 Further Maths. THIS IS TOP PRIORITY.
-
-2. IF contains: force, velocity, electric field, magnetic, quantum, wave, energy in joules, physics units -> 9702 Physics
-
-3. IF contains: algorithm, database, network, SQL, binary, stack, queue, OOP, logic gates -> 9618 CS
-
+ACADEMIC SUBJECT DETECTION - CHECK IN ORDER:
+1. polar, r = f(theta), de Moivre, complex, matrix, eigenvalue, hyperbolic, Maclaurin -> 9231 Further Maths. TOP PRIORITY. polar graphs = ALWAYS 9231.
+2. force, velocity, electric field, magnetic, quantum, wave -> 9702 Physics
+3. algorithm, database, SQL, network, binary, stack, OOP, logic gates -> 9618 CS
 4. ELSE -> 9709 Maths
 
-Example: "what the formula for finding area under graph of a polar graphs" -> MUST BE 9231, NOT 9709.
+FLOW:
+- I give you SIMILAR QP FOUND + EQUIVALENT MS
+- State which paper similar question came from
+- Use MS with M1 A1 B1 bold keywords
+- Mention year
 
-FLOW: You are given SIMILAR QP FOUND + EQUIVALENT MS. State which paper you found, then use MS with M1 A1 B1 bold.
-
-OUTPUT:
-- Start with **Subject detected: 9231 Further Mathematics** (or correct)
-- Use LaTeX: $$A = \\frac{{1}}{{2}} \\int_{{\\alpha}}^{{\\beta}} [f(\\theta)]^2 d\\theta$$
+OUTPUT FOR ACADEMIC ONLY:
+- Start with **Subject detected: [CODE] [Name]**
+- LaTeX: $$A = \\frac{{1}}{{2}} \\int_{{\\alpha}}^{{\\beta}} [f(\\theta)]^2 d\\theta$$
 - Never write (theta), write \\theta
-- Mention year: "From 2024 Mark Scheme"
 
 Level: {level}
-Simple: 3000 tokens short, Moderate: 5000 detailed, Best: 8192 full
+Simple 3000 short, Moderate 5000 detailed, Best 8192 full
 
 CONTEXT (QP + MS LINKED):
 {context}
 """
 
-# === FIXED IMAGE FUNCTION - SOLVES YOUR OSError ===
 def to_b64(file):
     try:
         img = Image.open(file)
-        # Fix RGBA/P mode which JPEG cannot save
         if img.mode in ("RGBA", "LA", "P"):
             background = Image.new("RGB", img.size, (255, 255, 255))
             if img.mode == "P":
@@ -155,7 +164,6 @@ def to_b64(file):
             img = background
         else:
             img = img.convert("RGB")
-
         if max(img.size) > 1024:
             img.thumbnail((1024, 1024))
         buf = BytesIO()
@@ -164,6 +172,12 @@ def to_b64(file):
     except Exception as e:
         print(f"Image error: {e}")
         return None
+
+def is_greeting_msg(t):
+    t = t.lower().strip()
+    if len(t) > 30: return False
+    greetings = ["hi","hie","hii","hello","hey","how are you","whats up","sup","good morning","good afternoon","good evening","thanks","thank you","okay","ok","yo","morning"]
+    return any(g in t for g in greetings)
 
 with st.sidebar:
     st.markdown("## 🎓 Cambridge AI")
@@ -186,7 +200,7 @@ with st.sidebar:
 
 current=st.session_state.chats[st.session_state.current_chat]
 st.title("Cambridge AI")
-st.caption(f"{st.session_state.level} • {len(chunks)} chunks • QP->MS")
+st.caption(f"{st.session_state.level} • {len(chunks)} chunks • QP->MS Linked • Model: {TEXT_MODEL}")
 for m in current["messages"]:
     with st.chat_message(m["role"]):
         if "image_bytes" in m: st.image(m["image_bytes"], width=350)
@@ -208,69 +222,98 @@ if prompt_data:
     text = prompt_data.text if hasattr(prompt_data, 'text') else str(prompt_data)
     files = prompt_data.files if hasattr(prompt_data, 'files') else []
     b64=None; img_bytes=None
-    # === FIXED FILE HANDLING - PREVENTS CRASH ===
     if len(files)>0:
         try:
             img_bytes = files[0].getvalue()
             b64 = to_b64(files[0])
-        except Exception as e:
-            print(f"File read error: {e}")
+        except:
             img_bytes = None
             b64 = None
         if not text:
             text="Explain this picture using marking scheme, detect subject"
 
     if text:
+        greet = is_greeting_msg(text) and not b64
         if current["title"]=="New Chat": current["title"]=text[:35]
         umsg={"role":"user","content":text}
         if img_bytes: umsg["image_bytes"]=img_bytes
         current["messages"].append(umsg)
+
         with st.chat_message("assistant"):
-            ph=st.empty(); ph.markdown("🔍 Step 1: Finding similar Question Paper...")
+            ph=st.empty()
             token_map={"Simple":3000,"Moderate":5000,"Best":8192}
-            q_emb=embed_model.encode([text])
-            D,I=index.search(np.array(q_emb).astype('float32'),25)
-            raw_all = [chunks[i] for i in I[0]]
 
-            def get_y(t):
-                yrs = re.findall(r'(20[1-2][0-9])', t)
-                return max([int(y) for y in yrs]) if yrs else 0
+            if greet:
+                ph.markdown("👋...")
+                system_prompt = get_system_prompt(st.session_state.level, "", is_greeting=True)
+                try:
+                    resp=client.chat.completions.create(model=TEXT_MODEL,
+                        messages=[{"role":"system","content": system_prompt},{"role":"user","content": text}],
+                        max_tokens=500)
+                except:
+                    resp=client.chat.completions.create(model=FALLBACK_TEXT,
+                        messages=[{"role":"system","content": system_prompt},{"role":"user","content": text}],
+                        max_tokens=500)
+                ans=fix(resp.choices[0].message.content)
+                ph.empty(); st.markdown(ans)
+                current["messages"].append({"role":"assistant","content":ans})
+            else:
+                ph.markdown("🔍 Step 1: Finding similar Question Paper...")
+                q_emb=embed_model.encode([text])
+                D,I=index.search(np.array(q_emb).astype('float32'),25)
+                raw_all = [chunks[i] for i in I[0]]
 
-            raw_str_list = [ (c["text"] if isinstance(c, dict) else c) for c in raw_all ]
-            qp_like = []
-            ms_like = []
-            for txt in raw_str_list:
-                if any(k in txt for k in ["M1","A1","B1","M0","A0","FT","mark scheme"]):
-                    ms_like.append(txt)
+                def get_y(t):
+                    yrs = re.findall(r'(20[1-2][0-9])', t)
+                    return max([int(y) for y in yrs]) if yrs else 0
+
+                raw_str_list = [ (c["text"] if isinstance(c, dict) else c) for c in raw_all ]
+                qp_like = []
+                ms_like = []
+                for txt in raw_str_list:
+                    if any(k in txt for k in ["M1","A1","B1","M0","A0","FT","mark scheme"]):
+                        ms_like.append(txt)
+                    else:
+                        qp_like.append(txt)
+
+                qp_like_sorted = sorted(qp_like, key=get_y, reverse=True)
+                ms_like_sorted = sorted(ms_like, key=get_y, reverse=True)
+                best_qp = qp_like_sorted[0] if qp_like_sorted else raw_str_list[0]
+
+                ph.markdown(f"✅ Similar QP found\n\n🔍 Step 2: Pulling Mark Scheme...")
+
+                if ms_like_sorted:
+                    context = f"SIMILAR QUESTION PAPER FOUND:\n{best_qp}\n\n---\n\nEQUIVALENT MARK SCHEME (Latest year first):\n" + "\n\n---\n\n".join(ms_like_sorted[:6])
                 else:
-                    qp_like.append(txt)
+                    context = "\n\n---\n\n".join(sorted(raw_str_list, key=get_y, reverse=True)[:7])
 
-            qp_like_sorted = sorted(qp_like, key=get_y, reverse=True)
-            ms_like_sorted = sorted(ms_like, key=get_y, reverse=True)
-            best_qp = qp_like_sorted[0] if qp_like_sorted else raw_str_list[0]
+                system_prompt = get_system_prompt(st.session_state.level, context, is_greeting=False)
 
-            ph.markdown(f"✅ Similar QP: {best_qp[:100]}... \n\n🔍 Step 2: Pulling Mark Scheme...")
+                try:
+                    if b64:
+                        resp=client.chat.completions.create(model=VISION_MODEL,
+                            messages=[{"role":"system","content": system_prompt},
+                                      {"role":"user","content":[{"type":"text","text": text},{"type":"image_url","image_url":{"url": f"data:image/jpeg;base64,{b64}"}}]}],
+                            max_tokens=token_map[st.session_state.level])
+                    else:
+                        resp=client.chat.completions.create(model=TEXT_MODEL,
+                            messages=[{"role":"system","content": system_prompt},{"role":"user","content": text}],
+                            max_tokens=token_map[st.session_state.level])
+                except Exception as e:
+                    print(f"Primary failed {e}, fallback")
+                    if b64:
+                        resp=client.chat.completions.create(model=FALLBACK_VISION,
+                            messages=[{"role":"system","content": system_prompt},
+                                      {"role":"user","content":[{"type":"text","text": text},{"type":"image_url","image_url":{"url": f"data:image/jpeg;base64,{b64}"}}]}],
+                            max_tokens=token_map[st.session_state.level])
+                    else:
+                        resp=client.chat.completions.create(model=FALLBACK_TEXT,
+                            messages=[{"role":"system","content": system_prompt},{"role":"user","content": text}],
+                            max_tokens=token_map[st.session_state.level])
 
-            if ms_like_sorted:
-                context = f"SIMILAR QUESTION PAPER FOUND:\n{best_qp}\n\n---\n\nEQUIVALENT MARK SCHEME (Latest year first):\n" + "\n\n---\n\n".join(ms_like_sorted[:6])
-            else:
-                context = "\n\n---\n\n".join(sorted(raw_str_list, key=get_y, reverse=True)[:7])
+                ans=fix(resp.choices[0].message.content)
+                ph.empty(); st.markdown(ans)
+                current["messages"].append({"role":"assistant","content":ans})
 
-            system_prompt = get_system_prompt(st.session_state.level, context)
-
-            # If image failed to convert, send text only
-            if b64:
-                resp=client.chat.completions.create(model="meta-llama/llama-4-scout-17b-16e-instruct",
-                    messages=[{"role":"system","content": system_prompt},
-                              {"role":"user","content":[{"type":"text","text": text},{"type":"image_url","image_url":{"url": f"data:image/jpeg;base64,{b64}"}}]}],
-                    max_tokens=token_map[st.session_state.level])
-            else:
-                resp=client.chat.completions.create(model="openai/gpt-oss-20b",
-                    messages=[{"role":"system","content": system_prompt},{"role":"user","content": text}],
-                    max_tokens=token_map[st.session_state.level])
-
-            ans=fix(resp.choices[0].message.content)
-            ph.empty(); st.markdown(ans)
-            current["messages"].append({"role":"assistant","content":ans})
         save_chats_for_user(uid, st.session_state.chats)
         st.rerun()
