@@ -10,57 +10,28 @@ st.markdown("""
 .stApp { background: radial-gradient(ellipse at top, #1a2235 0%, #0e1117 70%); }
 div[data-testid="stChatMessage"] { background: rgba(30,34,45,0.6)!important; backdrop-filter: blur(12px); border:1px solid rgba(255,255,255,0.08); border-radius:20px; }
 
-/* Main textbox */
-div[data-testid="stChatInput"] { position: relative!important; }
+/* ORIGINAL GLOWING TEXTBOX - RESTORED */
 div[data-testid="stChatInput"] > div {
     background: rgba(30,34,45,0.7)!important;
     border-radius:24px!important;
     border:1px solid rgba(255,255,255,0.1)!important;
-    padding-right: 95px!important;
 }
-
-/* 3 dots - SHRUNK and on SAME LINE to the RIGHT next to Send */
-div[data-testid="stPopover"] {
-    position: absolute!important;
-    right: 50px!important;
-    bottom: 6px!important;
-    z-index: 9999!important;
+div[data-testid="stChatInput"]:hover > div {
+    border-color: rgba(77,166,255,0.5)!important;
+    box-shadow: 0 0 18px rgba(77,166,255,0.35)!important;
 }
-div[data-testid="stPopover"] > button {
-    background: rgba(255,255,255,0.08)!important;
-    border:1px solid rgba(255,255,255,0.12)!important;
-    border-radius:50%!important;
-    width:32px!important; height:32px!important;
+div[data-testid="stChatInput"]:focus-within > div {
+    border:2px solid #4da6ff!important;
+    box-shadow: none!important;
 }
-
-/* Hide any extra empty bar below */
-div[data-testid="stChatInput"] + div { display: none!important; }
 </style>
 """, unsafe_allow_html=True)
 
-# Ctrl+V paste
-st.components.v1.html("""
-<script>
-document.addEventListener('paste', (e) => {
-    const items = (e.clipboardData || window.clipboardData).items;
-    for (let i=0; i<items.length; i++) {
-        if (items[i].type.indexOf('image')!== -1) {
-            const div = document.createElement('div');
-            div.innerText = '📷 Image pasted! Click Send to analyze';
-            div.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#4da6ff;color:white;padding:10px 20px;border-radius:20px;z-index:99999;';
-            document.body.appendChild(div);
-            setTimeout(()=>div.remove(),2500);
-        }
-    }
-});
-</script>
-""", height=0)
-
-if "chats" not in st.session_state: st.session_state.chats={}
-if "current_chat" not in st.session_state:
+if "chats" not in st.session_state:
+    st.session_state.chats={}
     nid=str(uuid.uuid4())[:8]
     st.session_state.current_chat=nid
-    st.session_state.chats[nid]={"title":"New Chat","messages":[{"role":"assistant","content":"Hey! Ask anything or 📷 paste picture with Ctrl+V"}]}
+    st.session_state.chats[nid]={"title":"New Chat","messages":[{"role":"assistant","content":"Hey! Ask or 📷 add picture with +"}]}
 if "level" not in st.session_state: st.session_state.level="Simple"
 
 client=Groq(api_key=st.secrets["GROQ_API_KEY"])
@@ -107,42 +78,28 @@ with c3:
     if st.button("Best 1000", use_container_width=True, type="primary" if st.session_state.level=="Best" else "secondary"):
         st.session_state.level="Best"; st.rerun()
 
-# 3 DOTS BUTTON - same line, right side, shrunk
-with st.popover("⋮", help="Upload picture"):
-    st.markdown("**Add picture**")
-    pic = st.file_uploader("📤 Upload picture", type=["jpg","jpeg","png","webp"], label_visibility="collapsed")
-    cam = st.camera_input("📷 Camera")
-    st.caption("Or copy image & Ctrl+V in textbox")
-    if pic: st.session_state["temp_pic"]=pic
-    if cam: st.session_state["temp_pic"]=cam
-
+# ONLY ONE TEXTBOX - ORIGINAL GLOWING ONE - NO EXTRA BOX BELOW
 prompt_data = st.chat_input("ask or paste image (Ctrl+V)...", accept_file=True, file_type=["jpg","jpeg","png","webp"])
 
-b64=None
-img_disp=None
 if prompt_data:
     text = prompt_data.text if hasattr(prompt_data, 'text') else str(prompt_data)
     files = prompt_data.files if hasattr(prompt_data, 'files') else []
+    b64=None
+    img_bytes=None
 
     if len(files)>0:
-        img_disp=files[0].getvalue()
+        img_bytes=files[0].getvalue()
         b64=to_b64(files[0])
-        if not text: text="Explain / solve this picture in detail"
-    elif "temp_pic" in st.session_state and st.session_state["temp_pic"]:
-        f=st.session_state["temp_pic"]
-        img_disp=f.getvalue() if hasattr(f,'getvalue') else None
-        if hasattr(f,'seek'): f.seek(0)
-        b64=to_b64(f)
-        if not text: text="Explain this picture"
+        if not text: text="Explain this picture in detail"
 
     if text:
         if current["title"]=="New Chat": current["title"]=text[:35]
         umsg={"role":"user","content":text}
-        if img_disp: umsg["image_bytes"]=img_disp
+        if img_bytes: umsg["image_bytes"]=img_bytes
         current["messages"].append(umsg)
 
         with st.chat_message("assistant"):
-            ph=st.empty(); ph.markdown("👁️ Looking at picture...")
+            ph=st.empty(); ph.markdown("👁️ Looking at picture..." if b64 else "💭 Thinking...")
             token_map={"Simple":400,"Moderate":750,"Best":1000}
             q_emb=embed_model.encode([text]); D,I=index.search(np.array(q_emb).astype('float32'),3)
             context="\n\n".join([chunks[i] for i in I[0]])
@@ -158,5 +115,4 @@ if prompt_data:
             ans=fix(resp.choices[0].message.content)
             ph.empty(); st.markdown(ans)
             current["messages"].append({"role":"assistant","content":ans})
-        if "temp_pic" in st.session_state: del st.session_state["temp_pic"]
         st.rerun()
