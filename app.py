@@ -78,43 +78,12 @@ if st.session_state.get("loaded_uid")!=uid:
 
 if "level" not in st.session_state: st.session_state.level="Simple"
 
-# === AUTO-TRY ALL MODELS ===
-# Groq Production models that are still active May 2026
-TEXT_MODELS = [
-    "openai/gpt-oss-20b", # your original - fastest
-    "openai/gpt-oss-120b",
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "meta-llama/llama-4-maverick-17b-128e-instruct",
-]
-
-VISION_MODELS = [
-    "meta-llama/llama-4-maverick-17b-128e-instruct", # Best vision
-    "meta-llama/llama-4-scout-17b-16e-instruct", # Second vision (may be disabled on some keys - will auto skip)
-    "llama-3.3-70b-versatile", # fallback if vision fails but will still work for text part
-]
+# FIXED: TEXT MODEL + VISION MODEL SEPARATE
+TEXT_MODEL = "openai/gpt-oss-20b" # Your original - text only, fast 1000 tok/s
+VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct" # Vision - supports images
+VISION_FALLBACK = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 client=Groq(api_key=st.secrets["GROQ_API_KEY"])
-
-def call_groq_auto(messages, max_tokens, is_vision=False):
-    models_to_try = VISION_MODELS if is_vision else TEXT_MODELS
-    last_error = None
-    for model_id in models_to_try:
-        try:
-            # For text-only models, if messages contain image_url array, convert to string for that try
-            # but we only try vision models for is_vision=True so this handles format error
-            resp = client.chat.completions.create(
-                model=model_id,
-                messages=messages,
-                max_tokens=max_tokens
-            )
-            print(f"✅ Success with {model_id}")
-            return resp, model_id
-        except Exception as e:
-            print(f"❌ Failed {model_id}: {e}")
-            last_error = e
-            continue
-    raise Exception(f"All models failed. Last error: {last_error}")
 
 def get_chunks_hash():
     try: return os.path.getmtime("chunks.pkl")
@@ -177,7 +146,7 @@ with st.sidebar:
 
 current=st.session_state.chats[st.session_state.current_chat]
 st.title("Cambridge AI")
-st.caption(f"{st.session_state.level} • {len(chunks)} • Auto-model")
+st.caption(f"{st.session_state.level} • {len(chunks)} • Text:{TEXT_MODEL} Vision:{VISION_MODEL}")
 for m in current["messages"]:
     with st.chat_message(m["role"]):
         if "image_bytes" in m: st.image(m["image_bytes"], width=350)
@@ -210,8 +179,7 @@ if prompt_data:
             ph=st.empty(); token_map={"Simple":3000,"Moderate":5000,"Best":8192}
             if greet:
                 system_prompt=get_system_prompt(st.session_state.level,"",True)
-                msgs=[{"role":"system","content":system_prompt},{"role":"user","content":text}]
-                resp, used = call_groq_auto(msgs, 500, is_vision=False)
+                resp=client.chat.completions.create(model=TEXT_MODEL, messages=[{"role":"system","content":system_prompt},{"role":"user","content":text}], max_tokens=500)
                 ans=fix(resp.choices[0].message.content); ph.empty(); st.markdown(ans); current["messages"].append({"role":"assistant","content":ans})
             else:
                 ph.markdown("🔍 Step 1: Finding QP..."); q_emb=embed_model.encode([text]); D,I=index.search(np.array(q_emb).astype('float32'),25); raw_all=[chunks[i] for i in I[0]]
@@ -228,19 +196,17 @@ if prompt_data:
                 else: context="\n\n---\n\n".join(sorted(raw_str_list, key=get_y, reverse=True)[:7])
                 system_prompt=get_system_prompt(st.session_state.level, context, False)
 
+                # === FIXED LOGIC: Text model = string, Vision model = array ===
                 if b64:
-                    msgs=[{"role":"system","content":system_prompt},{"role":"user","content":[{"type":"text","text":text},{"type":"image_url","image_url":{"url": f"data:image/jpeg;base64,{b64}"}}]}]
+                    # Image -> MUST use vision model with array content
                     try:
-                        resp, used = call_groq_auto(msgs, token_map[st.session_state.level], is_vision=True)
+                        resp=client.chat.completions.create(model=VISION_MODEL, messages=[{"role":"system","content":system_prompt},{"role":"user","content":[{"type":"text","text":text},{"type":"image_url","image_url":{"url": f"data:image/jpeg;base64,{b64}"}}]}], max_tokens=token_map[st.session_state.level])
                     except Exception as e:
-                        # If all vision models fail (like your 404 screenshot), fallback to text-only with no image
-                        print(f"All vision failed, fallback to text {e}")
-                        msgs=[{"role":"system","content":system_prompt},{"role":"user","content":text + " [Image was attached but vision model unavailable]"}]
-                        resp, used = call_groq_auto(msgs, token_map[st.session_state.level], is_vision=False)
+                        print(f"Vision primary failed {e}, trying fallback scout")
+                        resp=client.chat.completions.create(model=VISION_FALLBACK, messages=[{"role":"system","content":system_prompt},{"role":"user","content":[{"type":"text","text":text},{"type":"image_url","image_url":{"url": f"data:image/jpeg;base64,{b64}"}}]}], max_tokens=token_map[st.session_state.level])
                 else:
-                    msgs=[{"role":"system","content":system_prompt},{"role":"user","content":text}]
-                    resp, used = call_groq_auto(msgs, token_map[st.session_state.level], is_vision=False)
+                    # Text only -> use YOUR model gpt-oss-20b with string content
+                    resp=client.chat.completions.create(model=TEXT_MODEL, messages=[{"role":"system","content":system_prompt},{"role":"user","content":text}], max_tokens=token_map[st.session_state.level])
 
-                ans=fix(resp.choices[0].message.content) + f"\n\n*Model: {used}*"
-                ph.empty(); st.markdown(ans); current["messages"].append({"role":"assistant","content":ans})
+                ans=fix(resp.choices[0].message.content); ph.empty(); st.markdown(ans); current["messages"].append({"role":"assistant","content":ans})
         save_chats_for_user(uid, st.session_state.chats); st.rerun()
