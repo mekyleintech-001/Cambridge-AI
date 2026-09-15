@@ -11,6 +11,36 @@ from sentence_transformers import SentenceTransformer
 from groq import Groq
 from io import BytesIO
 from pathlib import Path
+from supabase import create_client
+
+
+# Supabase setup
+def get_supabase():
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_ANON_KEY"]
+    except:
+        # fallback if running locally
+        url = os.getenv("SUPABASE_URL", "https://yehlwrdkccmbghzngwxg.supabase.co")
+        key = os.getenv("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InllaGx3cmRrY2NtYmdoem5nd3hnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk0NzIxNDYsImV4cCI6MjEwNTA0ODE0Nn0.Hrxj0yoa7wGbBP9QUAIC4fwIBQndVTg7WjpSi97uJ7E")
+    return create_client(url, key)
+
+supabase = get_supabase()
+
+def save_chats(user_id, chats):
+    try:
+        supabase.table("chats").upsert({"user_id": user_id, "chats_json": chats, "updated_at": "now()"}).execute()
+    except Exception as e:
+        print(f"Save error: {e}")
+
+def load_chats(user_id):
+    try:
+        res = supabase.table("chats").select("chats_json").eq("user_id", user_id).execute()
+        if res.data:
+            return res.data[0]["chats_json"]
+    except Exception as e:
+        print(f"Load error: {e}")
+    return []
 
 st.set_page_config(page_title="Kyle AI", page_icon="🎓", layout="wide")
 
