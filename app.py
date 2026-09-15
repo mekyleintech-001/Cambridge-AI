@@ -1,7 +1,11 @@
 import streamlit as st
 import uuid
+import pickle
+import faiss
 import json
+import base64
 import os
+from PIL import Image
 # ... your other imports
 st.set_page_config(page_title="Kyle AI", page_icon="🤖")
 
@@ -25,7 +29,7 @@ st.write("What can I help you with today?")
 #... YOUR EXISTING GROQ / RAG CODE GOES BELOW HERE...
 from groq import Groq
 from io import BytesIO
-from PIL import Image
+
 
 st.set_page_config(page_title="Cambridge AI", page_icon="🎓", layout="wide")
 
