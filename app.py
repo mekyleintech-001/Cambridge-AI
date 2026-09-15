@@ -7,7 +7,7 @@ from groq import Groq
 from io import BytesIO
 from supabase import create_client
 
-# === REBUILD model.faiss FROM PARTS (GitHub 25MB limit fix) ===
+# === REBUILD model.faiss FROM PARTS ===
 if not os.path.exists("model.faiss"):
     part_files = sorted(glob.glob("model.faiss.part*"))
     if part_files:
@@ -15,7 +15,6 @@ if not os.path.exists("model.faiss"):
             for p in part_files:
                 out.write(open(p,'rb').read())
 
-# === SUPABASE SETUP ===
 def get_supabase():
     try:
         url = st.secrets["SUPABASE_URL"]
@@ -33,8 +32,7 @@ def get_user_id():
     return "guest"
 
 def load_chats_for_user(uid):
-    if uid == "guest":
-        return None
+    if uid == "guest": return None
     try:
         res = supabase.table("chats").select("chats_json").eq("user_id", uid).execute()
         if res.data and len(res.data) > 0:
@@ -44,8 +42,7 @@ def load_chats_for_user(uid):
     return None
 
 def save_chats_for_user(uid, chats_dict):
-    if uid == "guest":
-        return
+    if uid == "guest": return
     try:
         clean_chats = {}
         for cid, chat in chats_dict.items():
@@ -59,7 +56,6 @@ def save_chats_for_user(uid, chats_dict):
 
 st.set_page_config(page_title="Kyle AI", page_icon="🎓", layout="wide")
 
-# --- LOGIN ---
 if "guest_mode" not in st.session_state:
     st.session_state.guest_mode = False
 
@@ -80,9 +76,7 @@ st.markdown("""
 <style>
 .stApp { background: radial-gradient(ellipse at top, #1a2235 0%, #0e1117 70%); }
 div[data-testid="stChatMessage"] { background: rgba(30,34,45,0.6)!important; backdrop-filter: blur(12px); border:1px solid rgba(255,255,255,0.08); border-radius:20px; }
-div[data-testid="stChatInput"] > div {
-    background: rgba(30,34,45,0.7)!important; border-radius:24px!important; border:1px solid rgba(255,255,255,0.1)!important;
-}
+div[data-testid="stChatInput"] > div { background: rgba(30,34,45,0.7)!important; border-radius:24px!important; border:1px solid rgba(255,255,255,0.1)!important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -110,12 +104,9 @@ if "level" not in st.session_state: st.session_state.level="Simple"
 
 client=Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-# === FIX CACHE - AUTO RELOAD NEW CHUNKS ===
 def get_chunks_hash():
-    try:
-        return os.path.getmtime("chunks.pkl")
-    except:
-        return 0
+    try: return os.path.getmtime("chunks.pkl")
+    except: return 0
 
 @st.cache_resource
 def load_brain(file_hash):
@@ -127,37 +118,24 @@ def load_brain(file_hash):
 chunks,index,embed_model=load_brain(get_chunks_hash())
 
 def get_system_prompt(level, context):
-    return f"""You are Cambridge AI - Auto subject detector for 9618 Computer Science, 9709 Mathematics, 9702 Physics, 9231 Further Mathematics (A-Level).
+    return f"""You are Cambridge AI - Auto subject detector for 9618 Computer Science, 9709 Mathematics, 9702 Physics, 9231 Further Mathematics.
 
-AUTO-DETECT SUBJECT (Do NOT ask student):
-- Look at question keywords and decide:
-    * 9618 CS: algorithm, pseudocode, database, network, binary, stack, queue, OOP, SQL, logic gate, protocol
-    * 9709 Maths: differentiation, integration, trigonometry, vectors, probability, binomial, functions
-    * 9702 Physics: force, velocity, energy, electric field, quantum, waves, units N,J,eV
-    * 9231 Further Maths: matrix, determinant, complex number, de Moivre, induction proof, polar, differential equation, eigenvalue
-- Start answer with: **Subject detected: [SUBJECT CODE]**
+AUTO-DETECT SUBJECT:
+- 9618 CS: algorithm, pseudocode, database, network, binary, stack, queue, OOP, SQL
+- 9709 Maths: differentiation, integration, trigonometry, vectors, probability
+- 9702 Physics: force, velocity, energy, electric field, quantum, waves
+- 9231 Further Maths: matrix, determinant, complex number, de Moivre, induction
+Start with: **Subject detected: [CODE]**
 
-MARK SCHEME PRIORITY RULE (Most Important):
-1. You get 7 chunks. Some have years like "2024", "2023", "Oct/Nov 2022", "M/J 2021".
-2. PRIORITY ORDER: Latest year first -> going down. 2024 > 2023 > 2022 > 2021 > older.
-3. Check ALL mark schemes but give answer based on LATEST if conflict.
-4. If user says "2019 Q2", use scheme closest to that year.
-5. Always mention year: "(From 2024 Mark Scheme:...)"
-6. Put mark scheme keywords in **bold** and show M1, A1, B1 marks.
+MARK SCHEME PRIORITY: Sort latest first 2024 > 2023 > 2022. Use latest if conflict. Mention year.
 
-STUDY STRUCTURE:
-1. **Subject:** [detected]
-2. **Answer (Latest Mark Scheme: YYYY):** direct answer with **bold keywords**
-3. **Explanation:**
-4. **Exam Tip / Common Mistake:**
+Level: {level}
+- Simple: Short bullet, 3000 tokens
+- Moderate: Detailed + examples, 5000 tokens
+- Best: Full exam answer with ALL marking points + tips, MAX tokens
 
-CONTEXT (Sorted latest first):
+CONTEXT (Latest first):
 {context}
-
-Student Level: {level}
-- Simple: Short bullet points, 400 words max
-- Moderate: Detailed with examples, 750 words
-- Best: Full exam answer with marking points + examiner tips, 1000 words
 """
 
 def to_b64(file):
@@ -173,30 +151,23 @@ with st.sidebar:
     st.caption(f"📚 Loaded {len(chunks)} chunks")
     if st.user.is_logged_in:
         st.write(f"Logged in as: {st.user.email}")
-        if st.button("Logout", use_container_width=True):
-            save_chats_for_user(uid, st.session_state.chats)
-            st.logout()
+        if st.button("Logout", use_container_width=True): save_chats_for_user(uid, st.session_state.chats); st.logout()
     else:
         st.write("You are in Guest mode")
-        if st.button("Login with Google", use_container_width=True):
-            st.login()
-        if st.button("Exit Guest", use_container_width=True):
-            st.session_state.guest_mode = False
-            st.rerun()
+        if st.button("Login with Google", use_container_width=True): st.login()
+        if st.button("Exit Guest", use_container_width=True): st.session_state.guest_mode=False; st.rerun()
     if st.button("➕ New Chat", use_container_width=True, type="primary"):
         nid=str(uuid.uuid4())[:8]
         st.session_state.current_chat=nid
         st.session_state.chats[nid]={"title":"New Chat","messages":[{"role":"assistant","content":"Hey!"}]}
-        save_chats_for_user(uid, st.session_state.chats)
-        st.rerun()
+        save_chats_for_user(uid, st.session_state.chats); st.rerun()
     st.divider()
     st.write("Your chats:")
-    if "confirm_del_id" not in st.session_state:
-        st.session_state.confirm_del_id = None
+    if "confirm_del_id" not in st.session_state: st.session_state.confirm_del_id=None
     for cid, chat in list(st.session_state.chats.items())[::-1][:15]:
         if st.session_state.confirm_del_id == cid:
             st.warning(f"Delete '{chat['title'][:20]}'?")
-            c1, c2 = st.columns(2)
+            c1,c2=st.columns(2)
             with c1:
                 if st.button("Yes", key=f"yes_{cid}", use_container_width=True):
                     del st.session_state.chats[cid]
@@ -204,54 +175,47 @@ with st.sidebar:
                         nid=str(uuid.uuid4())[:8]
                         st.session_state.chats={nid:{"title":"New Chat","messages":[{"role":"assistant","content":"Hey!"}]}}
                         st.session_state.current_chat=nid
-                    else:
-                        st.session_state.current_chat = list(st.session_state.chats.keys())[0]
-                    st.session_state.confirm_del_id = None
-                    save_chats_for_user(uid, st.session_state.chats)
-                    st.rerun()
+                    else: st.session_state.current_chat=list(st.session_state.chats.keys())[0]
+                    st.session_state.confirm_del_id=None; save_chats_for_user(uid, st.session_state.chats); st.rerun()
             with c2:
                 if st.button("No", key=f"no_{cid}", use_container_width=True):
-                    st.session_state.confirm_del_id = None
-                    st.rerun()
+                    st.session_state.confirm_del_id=None; st.rerun()
         else:
-            col_a, col_b = st.columns([4,1])
+            col_a,col_b=st.columns([4,1])
             with col_a:
                 if st.button(chat["title"][:22], key=f"hist_{cid}", use_container_width=True):
-                    st.session_state.current_chat = cid
-                    st.rerun()
+                    st.session_state.current_chat=cid; st.rerun()
             with col_b:
                 if st.button("🗑️", key=f"del_{cid}"):
-                    st.session_state.confirm_del_id = cid
-                    st.rerun()
+                    st.session_state.confirm_del_id=cid; st.rerun()
 
 current=st.session_state.chats[st.session_state.current_chat]
 st.title("Cambridge AI")
-st.caption(f"by Keane Moyo • {st.session_state.level} • {uid}")
+st.caption(f"by Keane Moyo • {st.session_state.level} • {len(chunks)} chunks • {uid}")
 for m in current["messages"]:
     with st.chat_message(m["role"]):
         if "image_bytes" in m: st.image(m["image_bytes"], width=350)
         st.markdown(fix(m["content"]))
 
+# TOKEN MAP UPDATED HERE
 c1,c2,c3=st.columns(3)
 with c1:
-    if st.button("Simple 400", use_container_width=True, type="primary" if st.session_state.level=="Simple" else "secondary"):
+    if st.button("Simple 3000", use_container_width=True, type="primary" if st.session_state.level=="Simple" else "secondary"):
         st.session_state.level="Simple"; st.rerun()
 with c2:
-    if st.button("Moderate 750", use_container_width=True, type="primary" if st.session_state.level=="Moderate" else "secondary"):
+    if st.button("Moderate 5000", use_container_width=True, type="primary" if st.session_state.level=="Moderate" else "secondary"):
         st.session_state.level="Moderate"; st.rerun()
 with c3:
-    if st.button("Best 1000", use_container_width=True, type="primary" if st.session_state.level=="Best" else "secondary"):
+    if st.button("Best MAX", use_container_width=True, type="primary" if st.session_state.level=="Best" else "secondary"):
         st.session_state.level="Best"; st.rerun()
 
 prompt_data = st.chat_input("ask or paste image (Ctrl+V)...", accept_file=True, file_type=["jpg","jpeg","png","webp"])
 if prompt_data:
     text = prompt_data.text if hasattr(prompt_data, 'text') else str(prompt_data)
     files = prompt_data.files if hasattr(prompt_data, 'files') else []
-    b64=None
-    img_bytes=None
+    b64=None; img_bytes=None
     if len(files)>0:
-        img_bytes=files[0].getvalue()
-        b64=to_b64(files[0])
+        img_bytes=files[0].getvalue(); b64=to_b64(files[0])
         if not text: text="Explain this picture using marking scheme keywords"
     if text:
         if current["title"]=="New Chat": current["title"]=text[:35]
@@ -259,9 +223,8 @@ if prompt_data:
         if img_bytes: umsg["image_bytes"]=img_bytes
         current["messages"].append(umsg)
         with st.chat_message("assistant"):
-            ph=st.empty(); ph.markdown("👁️ Checking marking schemes..." if b64 else "💭 Checking latest mark schemes...")
-            token_map={"Simple":400,"Moderate":750,"Best":1000}
-
+            ph=st.empty(); ph.markdown("💭 Checking latest mark schemes...")
+            token_map={"Simple":3000,"Moderate":5000,"Best":8192}
             q_emb=embed_model.encode([text])
             D,I=index.search(np.array(q_emb).astype('float32'),7)
             raw = [chunks[i] for i in I[0]]
@@ -270,7 +233,6 @@ if prompt_data:
                 return max([int(y) for y in yrs]) if yrs else 0
             raw_sorted = sorted(raw, key=get_y, reverse=True)
             context="\n\n---\n\n".join(raw_sorted)
-
             system_prompt = get_system_prompt(st.session_state.level, context)
             if b64:
                 resp=client.chat.completions.create(model="meta-llama/llama-4-scout-17b-16e-instruct",
