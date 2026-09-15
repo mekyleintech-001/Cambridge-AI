@@ -11,6 +11,11 @@ from sentence_transformers import SentenceTransformer
 from groq import Groq
 from io import BytesIO
 from supabase import create_client
+import glob, os
+if not os.path.exists("model.faiss"):
+    with open("model.faiss", 'wb') as out:
+        for p in sorted(glob.glob("model.faiss.part*")):
+            out.write(open(p,'rb').read())
 
 # === SUPABASE SETUP ===
 def get_supabase():
