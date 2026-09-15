@@ -1,4 +1,25 @@
-import streamlit as st, pickle, faiss, numpy as np, uuid, re, base64
+import streamlit as st
+
+st.set_page_config(page_title="Kyle AI", page_icon="🤖")
+
+# ----- GOOGLE LOGIN -----
+if not st.user.is_logged_in:
+    st.title("Welcome to Kyle AI 🤖")
+    st.write("Please login to continue and save your chat history")
+
+    if st.button("Continue with Google"):
+        st.login()
+    st.stop() # Stop here if not logged in
+
+# ----- IF LOGGED IN, SHOW THIS -----
+st.sidebar.write(f"Logged in as: {st.user.email}")
+if st.sidebar.button("Logout"):
+    st.logout()
+
+st.title(f"Hi {st.user.name} 👋")
+st.write("What can I help you with today?")
+
+#... YOUR EXISTING GROQ / RAG CODE GOES BELOW HERE...
 from groq import Groq
 from io import BytesIO
 from PIL import Image
