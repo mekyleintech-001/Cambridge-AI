@@ -27,7 +27,7 @@ if query:
     D, I = index.search(np.array(q_emb).astype('float32'), 3)
     context = "\n\n".join([chunks[i] for i in I[0]])
     r = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-20b",
         messages=[
             {"role":"system","content":f"Use this context: {context}"},
             {"role":"user","content":query}
