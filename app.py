@@ -37,8 +37,7 @@ def get_supabase():
 supabase = get_supabase()
 
 def get_user_id():
-    if st.user.is_logged_in:
-        return st.user.email.replace('@','_at_').replace('.','_')
+    if st.user.is_logged_in: return st.user.email.replace('@','_at_').replace('.','_')
     return "guest"
 
 def load_chats_for_user(uid):
@@ -58,17 +57,15 @@ def save_chats_for_user(uid, chats_dict):
 
 st.set_page_config(page_title="Kyle AI", page_icon="🎓", layout="wide")
 
-if "guest_mode" not in st.session_state:
-    st.session_state.guest_mode = False
+if "guest_mode" not in st.session_state: st.session_state.guest_mode = False
 if not st.user.is_logged_in and not st.session_state.guest_mode:
     st.title("Welcome to Kyle AI 🤖")
-    c1, c2 = st.columns(2)
+    c1,c2 = st.columns(2)
     with c1:
         if st.button("Continue with Google", use_container_width=True): st.login()
     with c2:
         if st.button("Continue as Guest", use_container_width=True):
-            st.session_state.guest_mode = True
-            st.rerun()
+            st.session_state.guest_mode = True; st.rerun()
     st.stop()
 
 st.markdown("""<style>.stApp{background:radial-gradient(ellipse at top,#1a2235 0%,#0e1117 70%);}div[data-testid="stChatMessage"]{background:rgba(30,34,45,0.6)!important;backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.08);border-radius:20px;}div[data-testid="stChatInput"]>div{background:rgba(30,34,45,0.7)!important;border-radius:24px!important;}</style>""", unsafe_allow_html=True)
@@ -92,18 +89,15 @@ if st.session_state.get("loaded_uid")!= uid:
         st.session_state.current_chat = list(loaded.keys())[0]
     st.session_state.loaded_uid = uid
 
-if "level" not in st.session_state:
-    st.session_state.level = "Best"
+if "level" not in st.session_state: st.session_state.level = "Best"
 
 TEXT_MODELS = ["openai/gpt-oss-20b","openai/gpt-oss-120b","llama-3.3-70b-versatile","llama-3.1-8b-instant"]
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 def call_groq_auto(messages, max_tokens):
     for mid in TEXT_MODELS:
-        try:
-            return client.chat.completions.create(model=mid, messages=messages, max_tokens=max_tokens), mid
-        except:
-            continue
+        try: return client.chat.completions.create(model=mid, messages=messages, max_tokens=max_tokens), mid
+        except: continue
     raise Exception("All models failed")
 
 @st.cache_resource
@@ -134,49 +128,43 @@ def fix(t):
     t = t.replace("$$$$","$$").replace("○","- ").replace("•","- ")
     return t
 
-def is_greeting(t):
-    return len(t.strip()) < 25 and any(g in t.lower() for g in ["hi","hie","hello","hey","thanks","yo","morning","ok"])
+def is_greeting(t): return len(t.strip()) < 25 and any(g in t.lower() for g in ["hi","hie","hello","hey","thanks","yo","morning","ok"])
 
-def get_system_prompt(level, context, greeting=False, generic=False):
-    if greeting:
-        return "You are Kyle AI. Greeting only. Friendly short. Do NOT say Subject detected."
-    if generic:
-        return "You are Kyle AI - helpful friendly AI like ChatGPT. NOT Cambridge 9618/9709/9702/9231. Respond normally. Do NOT say Subject detected."
+def get_system_prompt(level, context):
     inst = {
         "Simple":"SHORT 3000 tokens. Direct M1 A1 only.",
         "Moderate":"DETAILED 5000 tokens. Explain steps.",
         "Best":"BEST MAX 8192 tokens. Full mark scheme: start **Subject detected: XXXX - Name**, paper/year, M1 A1 B1 FT bold, full explanation, LaTeX $$...$$ MATH ONLY, common mistakes, boxed final."
     }[level]
-    return f"""You are Kyle AI - Cambridge AS expert. {inst}
-RULES:
-1. AS ONLY: 9709 AS=P1+M1/S1, 9702 AS=kinematics/dynamics/forces/work energy/matter/waves/DC/particle, 9618 AS=fundamentals/hardware/software/networks/data representation/programming/AS databases, 9231=AS depth. If A2 say Outside AS syllabus (A2).
-2. LATEX: MATH ONLY $$x^2$$. NEVER put SQL/code in $$ or \\text{{}}.
-3. SQL: ALWAYS use ```sql block, never $$.
-CONTEXT (AS only):
+    return f"""You are Kyle AI - Cambridge AS Level ONLY (9618/9709/9702/9231).
+
+STRICT RULES:
+1. AS SYLLABUS ONLY. If question is NOT Cambridge AS, reply: "I only answer Cambridge AS Level 9618 / 9709 / 9702 / 9231. Please ask a Cambridge AS question."
+2. ALWAYS remember previous messages in this chat. If user says "explain that again", "part b", "follow up", relate to last question.
+3. LATEX: MATH ONLY $$x^2$$. NEVER put SQL/code in $$ or \\text{{}}.
+4. SQL: ALWAYS use ```sql block, never $$.
+5. {inst}
+
+CONTEXT (AS past papers):
 {context}
 """
 
 with st.sidebar:
     st.markdown("## 🎓 Kyle AI")
-    st.caption(f"📚 {len(chunks)} chunks • AS Only")
+    st.caption(f"📚 {len(chunks)} chunks • AS Only • With Memory")
     if st.user.is_logged_in:
         st.caption(f"👤 {st.user.email}")
         if st.button("Logout", use_container_width=True):
-            save_chats_for_user(uid, st.session_state.chats)
-            st.logout()
+            save_chats_for_user(uid, st.session_state.chats); st.logout()
     else:
         if st.button("Login with Google", use_container_width=True): st.login()
         if st.button("Exit Guest", use_container_width=True):
-            st.session_state.guest_mode = False
-            st.rerun()
-
+            st.session_state.guest_mode=False; st.rerun()
     if st.button("➕ New Chat", use_container_width=True, type="primary"):
         nid = str(uuid.uuid4())[:8]
-        st.session_state.chats[nid] = {"title":"New Chat","messages":[{"role":"assistant","content":"New chat started!"}]}
+        st.session_state.chats[nid] = {"title":"New Chat","messages":[{"role":"assistant","content":"New chat started! I remember our chat now."}]}
         st.session_state.current_chat = nid
-        save_chats_for_user(uid, st.session_state.chats)
-        st.rerun()
-
+        save_chats_for_user(uid, st.session_state.chats); st.rerun()
     if st.button("🗑️ Delete Current Chat", use_container_width=True):
         cid = st.session_state.current_chat
         if len(st.session_state.chats) > 1:
@@ -186,16 +174,12 @@ with st.sidebar:
             nid = str(uuid.uuid4())[:8]
             st.session_state.chats = {nid: {"title":"New Chat","messages":[{"role":"assistant","content":"New chat!"}]}}
             st.session_state.current_chat = nid
-        save_chats_for_user(uid, st.session_state.chats)
-        st.rerun()
-
+        save_chats_for_user(uid, st.session_state.chats); st.rerun()
     if st.button("🗑️ Delete All Chats", use_container_width=True):
         nid = str(uuid.uuid4())[:8]
         st.session_state.chats = {nid: {"title":"New Chat","messages":[{"role":"assistant","content":"All chats deleted. New chat!"}]}}
         st.session_state.current_chat = nid
-        save_chats_for_user(uid, st.session_state.chats)
-        st.rerun()
-
+        save_chats_for_user(uid, st.session_state.chats); st.rerun()
     st.divider()
     st.caption("Recent Chats")
     for cid in list(st.session_state.chats.keys())[::-1][:30]:
@@ -203,8 +187,7 @@ with st.sidebar:
         col1, col2 = st.columns([0.82,0.18])
         with col1:
             if st.button(chat["title"][:28], key=f"open_{cid}", use_container_width=True):
-                st.session_state.current_chat = cid
-                st.rerun()
+                st.session_state.current_chat = cid; st.rerun()
         with col2:
             if st.button("🗑️", key=f"del_{cid}", use_container_width=True):
                 if len(st.session_state.chats) > 1:
@@ -215,16 +198,14 @@ with st.sidebar:
                     nid = str(uuid.uuid4())[:8]
                     st.session_state.chats = {nid: {"title":"New Chat","messages":[{"role":"assistant","content":"New chat!"}]}}
                     st.session_state.current_chat = nid
-                save_chats_for_user(uid, st.session_state.chats)
-                st.rerun()
+                save_chats_for_user(uid, st.session_state.chats); st.rerun()
 
 current = st.session_state.chats[st.session_state.current_chat]
 st.title("Cambridge AI - AS Level")
-st.caption(f"Level: {st.session_state.level} • {len(chunks)} chunks")
+st.caption(f"Level: {st.session_state.level} • {len(chunks)} chunks • Memory ON")
 
 for m in current["messages"]:
-    with st.chat_message(m["role"]):
-        st.markdown(fix(m["content"]))
+    with st.chat_message(m["role"]): st.markdown(fix(m["content"]))
 
 c1,c2,c3 = st.columns(3)
 with c1:
@@ -237,63 +218,59 @@ with c3:
     if st.button("Best MAX", use_container_width=True, type="primary" if st.session_state.level=="Best" else "secondary"):
         st.session_state.level="Best"; st.rerun()
 
-prompt = st.chat_input("Ask any Cambridge question...")
+prompt = st.chat_input("Ask any Cambridge AS question...")
 if prompt:
-    if current["title"] == "New Chat":
-        current["title"] = prompt[:35]
+    if current["title"] == "New Chat": current["title"] = prompt[:35]
     current["messages"].append({"role":"user","content":prompt})
+
     with st.chat_message("assistant"):
         ph = st.empty()
-        token_map = {"Simple":3000,"Moderate":5000,"Best":8192}
-        generic_triggers = ["joke","story","who are you","what can you do","weather","essay","poem","recipe","movie","game","life advice","capital of"]
-        is_generic = any(t in prompt.lower() for t in generic_triggers)
+        ph.markdown("🔍 Searching AS past papers...")
 
-        if is_greeting(prompt):
-            sys_prompt = get_system_prompt(st.session_state.level, "", greeting=True)
-            msgs = [{"role":"system","content":sys_prompt},{"role":"user","content":prompt}]
-            resp,_ = call_groq_auto(msgs, 600)
-            ans = fix(resp.choices[0].message.content)
-            ph.empty(); st.markdown(ans)
-            current["messages"].append({"role":"assistant","content":ans})
+        # --- MEMORY: last 8 messages ---
+        history = current["messages"][-10:-1] # last 8 before current prompt
+        history_text = "\n".join([f"{m['role']}: {m['content'][:500]}" for m in history])
 
-        elif is_generic:
-            sys_prompt = get_system_prompt(st.session_state.level, "", generic=True)
-            msgs = [{"role":"system","content":sys_prompt},{"role":"user","content":prompt}]
-            resp,_ = call_groq_auto(msgs, 1000)
-            ans = fix(resp.choices[0].message.content)
-            ph.empty(); st.markdown(ans)
-            current["messages"].append({"role":"assistant","content":ans})
+        # --- RAG SEARCH ---
+        q_emb = embed_model.encode([prompt])
+        D,I = index.search(np.array(q_emb).astype('float32'), 25)
+        raw_all = [chunks[i] for i in I[0]]
 
+        def get_year(t):
+            yrs = re.findall(r"(20[1-2][0-9])", t)
+            return max([int(y) for y in yrs]) if yrs else 0
+
+        texts = [(c["text"] if isinstance(c, dict) else c) for c in raw_all]
+        qp=[]; ms=[]
+        for txt in texts:
+            if any(a2 in txt.lower() for a2 in ["p3","paper 3","m2","s2","a2 level"]): continue
+            if any(k in txt for k in ["M1","A1","B1","M0","FT"]): ms.append(txt)
+            else: qp.append(txt)
+
+        qp_s = sorted(qp, key=get_year, reverse=True)
+        ms_s = sorted(ms, key=get_year, reverse=True)
+        if ms_s:
+            context = f"AS QP:\n{qp_s[:3]}\n\nAS MS:\n" + "\n---\n".join(ms_s[:6]) + f"\n\nCHAT HISTORY:\n{history_text}"
         else:
-            ph.markdown("🔍 Searching AS past papers...")
-            q_emb = embed_model.encode([prompt])
-            D,I = index.search(np.array(q_emb).astype('float32'), 25)
-            raw_all = [chunks[i] for i in I[0]]
+            context = "\n---\n".join(sorted(texts, key=get_year, reverse=True)[:6]) + f"\n\nCHAT HISTORY:\n{history_text}"
 
-            def get_year(t):
-                yrs = re.findall(r"(20[1-2][0-9])", t)
-                return max([int(y) for y in yrs]) if yrs else 0
-
-            texts = [(c["text"] if isinstance(c, dict) else c) for c in raw_all]
-            qp=[]; ms=[]
-            for txt in texts:
-                if any(a2 in txt.lower() for a2 in ["p3","paper 3","m2","s2","a2 level"]): continue
-                if any(k in txt for k in ["M1","A1","B1","M0","FT"]): ms.append(txt)
-                else: qp.append(txt)
-
-            qp_s = sorted(qp, key=get_year, reverse=True)
-            ms_s = sorted(ms, key=get_year, reverse=True)
-            if ms_s:
-                context = f"AS QP:\n{qp_s}\n\nAS MS:\n" + "\n---\n".join(ms_s[:6])
-            else:
-                context = "\n---\n".join(sorted(texts, key=get_year, reverse=True)[:6])
-
-            sys_prompt = get_system_prompt(st.session_state.level, context, greeting=False)
-            msgs = [{"role":"system","content":sys_prompt},{"role":"user","content":prompt}]
+        # --- GREETING CHECK ---
+        if is_greeting(prompt):
+            msgs = [{"role":"system","content":"You are Kyle AI. Greeting only, friendly short. AS Level only."}, {"role":"user","content":prompt}]
+            resp,_ = call_groq_auto(msgs, 300)
+        else:
+            sys_prompt = get_system_prompt(st.session_state.level, context)
+            msgs = [{"role":"system","content":sys_prompt}]
+            # Add memory messages
+            for m in history[-6:]:
+                msgs.append({"role": m["role"], "content": m["content"]})
+            msgs.append({"role":"user","content":prompt})
+            token_map = {"Simple":3000,"Moderate":5000,"Best":8192}
             resp,_ = call_groq_auto(msgs, token_map[st.session_state.level])
-            ans = fix(resp.choices[0].message.content)
-            ph.empty(); st.markdown(ans)
-            current["messages"].append({"role":"assistant","content":ans})
+
+        ans = fix(resp.choices[0].message.content)
+        ph.empty(); st.markdown(ans)
+        current["messages"].append({"role":"assistant","content":ans})
 
     save_chats_for_user(uid, st.session_state.chats)
     st.rerun()
