@@ -1,4 +1,3 @@
-
 import streamlit as st
 import uuid, pickle, faiss, os, glob, re
 import numpy as np
@@ -122,8 +121,27 @@ def fix(t):
             cleaned = cleaned.replace("\\"," ").replace("{","").replace("}","")
             cleaned = re.sub(r"\s+"," ", cleaned).strip()
             return f"`{cleaned}`"
-        return f"$${inner}$$"     t = re.sub(r"\$\$(.*?)\$\$", clean_sql, t, flags=re.DOTALL)     t = t.replace("$$6pt","").replace("$$8pt","").replace("$$12pt","")
-    t = t.replace(r"\[","$$").replace(r"\]","$$").replace(r"\(","$").replace(r"\)","$")     t = t.replace("$$$$","$$").replace("○","- ").replace("•","- ")     return t  def is_greeting(t): return len(t.strip()) < 25 and any(g in t.lower() for g in ["hi","hie","hello","hey","thanks","yo","morning","ok"])  def get_system_prompt(level, context):     inst = {         "Simple":"SHORT 3000 tokens. Direct M1 A1 only.",         "Moderate":"DETAILED 5000 tokens. Explain steps.",         "Best":"BEST MAX 8192 tokens. Full mark scheme: start **Subject detected: XXXX - Name**, paper/year, M1 A1 B1 FT bold, full explanation, LaTeX $$...$$ MATH ONLY, common mistakes, boxed final."     }[level]     return f"""You are Kyle AI - Cambridge AS Level ONLY (9618/9709/9702/9231).  STRICT RULES: 1. AS SYLLABUS ONLY. If question is NOT Cambridge AS, reply: "I only answer Cambridge AS Level 9618 / 9709 / 9702 / 9231. Please ask a Cambridge AS question." 2. ALWAYS remember previous messages in this chat. If user says "explain that again", "part b", "follow up", relate to last question. 3. LATEX: MATH ONLY $$x^2$$. NEVER put SQL/code in $$ or \\text{{}}.
+        return f"$${inner}$$"
+    t = re.sub(r"\$\$(.*?)\$\$", clean_sql, t, flags=re.DOTALL)
+    t = t.replace("$$6pt","").replace("$$8pt","").replace("$$12pt","")
+    t = t.replace(r"\[","$$").replace(r"\]","$$").replace(r"\(","$").replace(r"\)","$")
+    t = t.replace("$$$$","$$").replace("○","- ").replace("•","- ")
+    return t
+
+def is_greeting(t): return len(t.strip()) < 25 and any(g in t.lower() for g in ["hi","hie","hello","hey","thanks","yo","morning","ok"])
+
+def get_system_prompt(level, context):
+    inst = {
+        "Simple":"SHORT 3000 tokens. Direct M1 A1 only.",
+        "Moderate":"DETAILED 5000 tokens. Explain steps.",
+        "Best":"BEST MAX 8192 tokens. Full mark scheme: start **Subject detected: XXXX - Name**, paper/year, M1 A1 B1 FT bold, full explanation, LaTeX $$...$$ MATH ONLY, common mistakes, boxed final."
+    }[level]
+    return f"""You are Kyle AI - Cambridge AS Level ONLY (9618/9709/9702/9231).
+
+STRICT RULES:
+1. AS SYLLABUS ONLY. When you answer a question it shout only have as content in it
+2. ALWAYS remember previous messages in this chat. If user says "explain that again or a prompt which will require you to revisit last message", "part b", "follow up", relate to last question.
+3. LATEX: MATH ONLY $$x^2$$. NEVER put SQL/code in $$ or \\text{{}}.
 4. SQL: ALWAYS use ```sql block, never $$.
 5. {inst}
 
